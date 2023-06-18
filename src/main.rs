@@ -1,14 +1,43 @@
+#[cfg(target_os = "linux")]
+use inotify::{Inotify, WatchMask};
 use std::fs;
 use std::process::Command;
+
+#[cfg(not(target_os = "linux"))]
 use std::{thread, time};
+
 fn main() {
     let filename = "./queue.txt";
-    let update_time = time::Duration::from_millis(1000);
 
+    #[cfg(target_os = "linux")]
+    {
+        let mut inotify = Inotify::init().expect("Error while initializing inotify instance");
+        inotify
+            .watches()
+            .add(filename, WatchMask::MODIFY)
+            .expect("Failed to add file watch");
+
+        loop {
+            // Read events that were added with `Watches::add` above.
+            let mut buffer = [0; 1024];
+            let events = inotify
+                .read_events_blocking(&mut buffer)
+                .expect("Error while reading events");
+
+            for event in events {
+                let list = load_and_clear(filename);
+                play_list(list);
+            }
+            inotify.read_events_blocking(&mut buffer);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
     loop {
         let list = load_and_clear(filename);
         play_list(list);
-        thread::sleep(update_time);
+        thread::sleep(time::Duration::from_millis(1000));
+        //println!("queue is working?...");
     }
 }
 
@@ -33,10 +62,12 @@ fn play_list(mut links: Vec<String>) {
 fn play_song(link: String) {
     let result = Command::new("mpv")
         .arg(link)
-        .arg("--ao=jack")
+        //.arg("--ao=alsa")
         .arg("--no-video")
-        .arg("--jack-port=music")
-        .arg("--really-quiet")
+        .arg("--volume=70")
+        //.arg("--jack-port=music")
+        //.arg("--msg-module")
+        .arg("--msg-level=all=warn,file=v")
         .status();
 
     match result {
